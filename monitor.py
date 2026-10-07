@@ -159,6 +159,26 @@ def authenticate():
 
     return "; ".join(cookie_parts)
 
+def find_target_card(obj):
+    """Parcourt tout l'objet récursivement pour repérer l'UUID ou le nom de la carte."""
+    if isinstance(obj, dict):
+        for v in obj.values():
+            match = find_target_card(v)
+            if match:
+                return match
+    elif isinstance(obj, list):
+        for item in obj:
+            match = find_target_card(item)
+            if match:
+                return match
+    elif isinstance(obj, str):
+        val = obj.strip()
+        if val in WATCHLIST:
+            return WATCHLIST[val]
+        if val.lower() in WATCHLIST_NAMES:
+            return WATCHLIST_NAMES[val.lower()]
+    return None
+
 def main():
     if not ANON_KEY:
         print("Erreur: Le secret WIKI_ANON_KEY est requis.")
@@ -213,6 +233,9 @@ def main():
 
     print(f"Total annonces uniques analysées : {len(all_auctions)}")
 
+    if all_auctions:
+        print(f"Clés d'une annonce type : {list(all_auctions[0].keys())}")
+
     cache = load_cache()
     new_finds = 0
 
@@ -221,27 +244,17 @@ def main():
         if not auction_id or auction_id in cache:
             continue
 
-        card_info = auction.get("card") or auction.get("cards") or {}
-        nested_id = card_info.get("id") if isinstance(card_info, dict) else None
-        direct_card_id = auction.get("card_id")
-
-        raw_title = ""
-        if isinstance(card_info, dict):
-            raw_title = card_info.get("name") or card_info.get("title") or ""
-        if not raw_title:
-            raw_title = auction.get("name") or auction.get("title") or ""
-
-        matched_name = None
-        if direct_card_id and direct_card_id in WATCHLIST:
-            matched_name = WATCHLIST[direct_card_id]
-        elif nested_id and nested_id in WATCHLIST:
-            matched_name = WATCHLIST[nested_id]
-        elif raw_title and raw_title.lower().strip() in WATCHLIST_NAMES:
-            matched_name = WATCHLIST_NAMES[raw_title.lower().strip()]
+        matched_name = find_target_card(auction)
 
         if matched_name:
-            price = auction.get("current_bid") or auction.get("base_amount") or "?"
-            end_at = auction.get("end_at")
+            price = (
+                auction.get("current_bid")
+                or auction.get("base_amount")
+                or auction.get("price")
+                or auction.get("buy_now_price")
+                or "?"
+            )
+            end_at = auction.get("end_at") or auction.get("ends_at") or auction.get("expires_at")
             time_left = get_time_remaining(end_at)
 
             print(f"MATCH: {matched_name} | {price} W | Reste : {time_left}")
