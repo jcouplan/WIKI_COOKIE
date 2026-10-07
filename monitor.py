@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,34 +98,62 @@ def get_time_remaining(end_at_str):
 
 def alert_discord(card_name, price, time_left):
     if not WEBHOOK_URL:
+        print("Erreur : DISCORD_WEBHOOK manquant")
         return
     data = {
         "content": f"🚨 **{card_name}** est sur le marché !\n💰 Mise actuelle : **{price} W** | ⏳ Reste : **{time_left}**\nhttps://www.wiki-masters.com/marketplace",
         "username": "WikiSniper"
     }
-    requests.post(WEBHOOK_URL, json=data)
+    r = requests.post(WEBHOOK_URL, json=data)
+    print(f"-> Discord alerté pour '{card_name}' (Code HTTP {r.status_code})")
 
 def main():
-    url = "https://www.wiki-masters.com/api/marketplace?page=1&limit=50&sort=recent"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
         "Accept": "application/json",
         "Cookie": COOKIE
     }
 
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Erreur API : {e}")
-        return
+    all_auctions = []
+    seen_ids = set()
 
-    data = response.json()
-    auctions = data.get("auctions", [])
+    # Parcours des pages 0 à 9 (jusqu'à 500 enchères)
+    for page in range(0, 10):
+        url = f"https://www.wiki-masters.com/api/marketplace?page={page}&limit=50&sort=recent"
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                print(f"Page {page} arrêt (Code {response.status_code})")
+                break
+
+            data = response.json()
+            auctions = data.get("auctions", [])
+            if not auctions:
+                break
+
+            new_count = 0
+            for auction in auctions:
+                a_id = auction.get("id")
+                if a_id and a_id not in seen_ids:
+                    seen_ids.add(a_id)
+                    all_auctions.append(auction)
+                    new_count += 1
+
+            print(f"Page {page} : {len(auctions)} annonces reçues ({new_count} nouvelles)")
+
+            if new_count == 0 or len(auctions) < 50:
+                break
+
+        except requests.RequestException as e:
+            print(f"Erreur API page {page} : {e}")
+            break
+
+    print(f"Total annonces uniques analysées : {len(all_auctions)}")
+
     cache = load_cache()
     new_finds = 0
 
-    for auction in auctions:
+    for auction in all_auctions:
         auction_id = auction.get("id")
         card_id = auction.get("card_id")
 
@@ -137,10 +166,11 @@ def main():
             end_at = auction.get("end_at")
             time_left = get_time_remaining(end_at)
 
-            print(f"Trouvé : {card_name} | {price} W | Reste : {time_left}")
+            print(f"MATCH: {card_name} | {price} W | Reste : {time_left}")
             alert_discord(card_name, price, time_left)
             cache.add(auction_id)
             new_finds += 1
+            time.sleep(0.5)
 
     print(f"Total alertes envoyées : {new_finds}")
     if new_finds > 0:
