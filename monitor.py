@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
-EMAIL = os.environ.get("WIKI_EMAIL")
-PASSWORD = os.environ.get("WIKI_PASSWORD")
 ANON_KEY = os.environ.get("WIKI_ANON_KEY")
+REFRESH_TOKEN_ENV = os.environ.get("WIKI_REFRESH_TOKEN")
 PROJECT_REF = "cyrxjeppjqsxxjayfrur"
 CACHE_FILE = Path("cache.json")
+SESSION_FILE = Path("session.json")
 
 WATCHLIST = {
     "52024fad-620f-462e-aee4-2856ae7092e9": "Franck Thilliez",
@@ -79,6 +79,20 @@ def save_cache(cache_data):
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(cache_data), f)
 
+def get_saved_refresh_token():
+    if SESSION_FILE.exists():
+        try:
+            with open(SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("refresh_token")
+        except Exception:
+            pass
+    return REFRESH_TOKEN_ENV
+
+def save_new_refresh_token(new_token):
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump({"refresh_token": new_token}, f)
+
 def get_time_remaining(end_at_str):
     if not end_at_str:
         return "inconnue"
@@ -102,52 +116,55 @@ def get_time_remaining(end_at_str):
 
 def alert_discord(card_name, price, time_left):
     if not WEBHOOK_URL:
-        print("Erreur : DISCORD_WEBHOOK manquant")
         return
     data = {
         "content": f"🚨 **{card_name}** est sur le marché !\n💰 Mise actuelle : **{price} W** | ⏳ Reste : **{time_left}**\nhttps://www.wiki-masters.com/marketplace",
         "username": "WikiSniper"
     }
-    r = requests.post(WEBHOOK_URL, json=data)
-    print(f"-> Discord alerté pour '{card_name}' (Code HTTP {r.status_code})")
+    requests.post(WEBHOOK_URL, json=data)
 
 def authenticate():
-    print("Authentification en cours...")
-    url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=password"
+    refresh_token = get_saved_refresh_token()
+    if not refresh_token:
+        print("Erreur : Aucun refresh token trouvé.")
+        exit(1)
+
+    print("Rafraîchissement de la session via refresh_token (sans captcha)...")
+    url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
     headers = {
         "apikey": ANON_KEY,
         "Content-Type": "application/json"
     }
     payload = {
-        "email": EMAIL,
-        "password": PASSWORD
+        "refresh_token": refresh_token
     }
-    
+
     r = requests.post(url, headers=headers, json=payload)
     if r.status_code != 200:
-        print(f"Échec de l'authentification ({r.status_code}): {r.text}")
+        print(f"Échec refresh ({r.status_code}): {r.text}")
         exit(1)
-        
+
     session = r.json()
-    
-    # Encodage de la session en base64 pour matcher le format SSR de Supabase
+    new_refresh = session.get("refresh_token")
+    if new_refresh:
+        save_new_refresh_token(new_refresh)
+
     raw_str = json.dumps(session)
     b64_str = base64.b64encode(raw_str.encode('utf-8')).decode('utf-8')
     full_value = f"base64-{b64_str}"
-    
-    # Supabase fragmente les cookies dépassant 3000 caractères
+
     chunks = [full_value[i:i+3000] for i in range(0, len(full_value), 3000)]
     cookie_parts = [f"sb-{PROJECT_REF}-auth-token.{i}={chunk}" for i, chunk in enumerate(chunks)]
-    
-    print("Authentification réussie, cookie généré.")
+
+    print("Session rafraîchie avec succès.")
     return "; ".join(cookie_parts)
 
 def main():
-    if not EMAIL or not PASSWORD or not ANON_KEY:
-        print("Erreur: Les secrets WIKI_EMAIL, WIKI_PASSWORD et WIKI_ANON_KEY sont requis.")
+    if not ANON_KEY:
+        print("Erreur: Le secret WIKI_ANON_KEY est requis.")
         exit(1)
 
-    fresh_cookie = authenticate()
+    cookie = authenticate()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
@@ -158,7 +175,7 @@ def main():
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
-        "Cookie": fresh_cookie
+        "Cookie": cookie
     }
 
     all_auctions = []
