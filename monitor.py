@@ -97,7 +97,9 @@ def get_saved_refresh_token():
         try:
             with open(SESSION_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("refresh_token")
+                token = data.get("refresh_token")
+                if token:
+                    return token
         except Exception:
             pass
     return REFRESH_TOKEN_ENV
@@ -142,7 +144,7 @@ def alert_discord(card_name, price, time_left):
 def authenticate():
     refresh_token = get_saved_refresh_token()
     if not refresh_token:
-        print("Erreur : refresh token introuvable.")
+        print("Erreur : aucun refresh token trouvé.")
         exit(1)
 
     url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
@@ -194,7 +196,7 @@ def find_target_card(obj):
 
 def main():
     if not ANON_KEY:
-        print("Erreur: WIKI_ANON_KEY manquant.")
+        print("Erreur : secret WIKI_ANON_KEY manquant.")
         exit(1)
 
     cookie = authenticate()
@@ -249,7 +251,6 @@ def main():
                     end_at = auction.get("end_at") or auction.get("ends_at") or auction.get("expires_at")
                     remaining_seconds, time_left = get_time_info(end_at)
 
-                    # Filtrage strict : alerte uniquement si l'enchère finit dans 30 min ou moins
                     if 0 < remaining_seconds <= 1800:
                         price = (
                             auction.get("current_bid")
