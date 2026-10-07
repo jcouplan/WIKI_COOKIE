@@ -66,6 +66,8 @@ WATCHLIST = {
     "0ab8685f-3018-49ef-bd8d-bf6ed2a5b98b": "ReMarkable"
 }
 
+WATCHLIST_NAMES = {name.lower().strip(): name for name in WATCHLIST.values()}
+
 def load_cache():
     if CACHE_FILE.exists():
         try:
@@ -129,7 +131,6 @@ def authenticate():
         print("Erreur : Aucun refresh token trouvé.")
         exit(1)
 
-    print("Rafraîchissement de la session via refresh_token (sans captcha)...")
     url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
     headers = {
         "apikey": ANON_KEY,
@@ -156,7 +157,6 @@ def authenticate():
     chunks = [full_value[i:i+3000] for i in range(0, len(full_value), 3000)]
     cookie_parts = [f"sb-{PROJECT_REF}-auth-token.{i}={chunk}" for i, chunk in enumerate(chunks)]
 
-    print("Session rafraîchie avec succès.")
     return "; ".join(cookie_parts)
 
 def main():
@@ -181,8 +181,8 @@ def main():
     all_auctions = []
     seen_ids = set()
 
-    for page in range(0, 10):
-        url = f"https://www.wiki-masters.com/api/marketplace?page={page}&limit=50&sort=recent"
+    for page in range(1, 11):
+        url = f"https://www.wiki-masters.com/api/marketplace?page={page}&limit=50&sort=recent&mine=1"
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code != 200:
@@ -218,19 +218,34 @@ def main():
 
     for auction in all_auctions:
         auction_id = auction.get("id")
-        card_id = auction.get("card_id")
-
         if not auction_id or auction_id in cache:
             continue
 
-        if card_id in WATCHLIST:
-            card_name = WATCHLIST[card_id]
+        card_info = auction.get("card") or auction.get("cards") or {}
+        nested_id = card_info.get("id") if isinstance(card_info, dict) else None
+        direct_card_id = auction.get("card_id")
+
+        raw_title = ""
+        if isinstance(card_info, dict):
+            raw_title = card_info.get("name") or card_info.get("title") or ""
+        if not raw_title:
+            raw_title = auction.get("name") or auction.get("title") or ""
+
+        matched_name = None
+        if direct_card_id and direct_card_id in WATCHLIST:
+            matched_name = WATCHLIST[direct_card_id]
+        elif nested_id and nested_id in WATCHLIST:
+            matched_name = WATCHLIST[nested_id]
+        elif raw_title and raw_title.lower().strip() in WATCHLIST_NAMES:
+            matched_name = WATCHLIST_NAMES[raw_title.lower().strip()]
+
+        if matched_name:
             price = auction.get("current_bid") or auction.get("base_amount") or "?"
             end_at = auction.get("end_at")
             time_left = get_time_remaining(end_at)
 
-            print(f"MATCH: {card_name} | {price} W | Reste : {time_left}")
-            alert_discord(card_name, price, time_left)
+            print(f"MATCH: {matched_name} | {price} W | Reste : {time_left}")
+            alert_discord(matched_name, price, time_left)
             cache.add(auction_id)
             new_finds += 1
             time.sleep(0.5)
