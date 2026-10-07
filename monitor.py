@@ -40,16 +40,38 @@ def save_cache(cache_data):
     with open(CACHE_FILE, "w", encoding="utf-8") as f:
         json.dump(list(cache_data), f)
 
-def alert_discord(card_name, auction_id):
+def alert_discord(card_name, price="?"):
     if not WEBHOOK_URL:
+        print("Erreur: Pas de DISCORD_WEBHOOK configuré.")
         return
     data = {
-        "content": f"🚨 **{card_name}** est sur le marché !\nLien : https://www.wiki-masters.com/marketplace",
+        "content": f"🚨 **{card_name}** est sur le marché ! (Mise: {price} W)\nLien : https://www.wiki-masters.com/marketplace",
         "username": "WikiSniper"
     }
-    requests.post(WEBHOOK_URL, json=data)
+    r = requests.post(WEBHOOK_URL, json=data)
+    print(f"Statut envoi Discord ({card_name}): {r.status_code}")
+
+def check_list(items, cache):
+    new_finds = 0
+    for item in items:
+        dumped = json.dumps(item, ensure_ascii=False)
+        item_id = str(item.get("id", item.get("auction_id", hash(dumped))))
+
+        if item_id in cache:
+            continue
+
+        for card in WATCHLIST:
+            if card.lower() in dumped.lower():
+                price = item.get("current_bid") or item.get("price") or item.get("bid") or "?"
+                print(f"-> Trouvé : {card} (ID: {item_id})")
+                alert_discord(card, price)
+                cache.add(item_id)
+                new_finds += 1
+                break
+    return new_finds
 
 def main():
+    # Retrait de &mine=1 pour scruter tout le marché public
     url = "https://www.wiki-masters.com/api/marketplace?page=1&limit=50&sort=recent"
     
     headers = {
@@ -60,32 +82,32 @@ def main():
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
+        print(f"Réponse API Wikimasters: Code {response.status_code}")
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"Erreur de requête: {e}")
         return
 
     data = response.json()
-    auctions = data.get("auctions", [])
     cache = load_cache()
-    new_finds = 0
+    
+    auctions = data.get("auctions", [])
+    selling = data.get("selling", [])
+    bidding = data.get("bidding", [])
+    
+    print(f"Nombre d'items trouvés - auctions: {len(auctions)}, selling: {len(selling)}, bidding: {len(bidding)}")
+    
+    if auctions:
+        print("Exemple d'objet auction reçu :", json.dumps(auctions[0], ensure_ascii=False)[:300])
 
-    for auction in auctions:
-        auction_str = str(auction)
-        auction_id = str(auction.get("id", hash(auction_str)))
+    total_new = 0
+    total_new += check_list(auctions, cache)
+    total_new += check_list(selling, cache)
+    total_new += check_list(bidding, cache)
 
-        if auction_id in cache:
-            continue
+    print(f"Total alertes envoyées : {total_new}")
 
-        for card in WATCHLIST:
-            if card in auction_str:
-                print(f"Match: {card}")
-                alert_discord(card, auction_id)
-                cache.add(auction_id)
-                new_finds += 1
-                break
-
-    if new_finds > 0:
+    if total_new > 0:
         save_cache(cache)
 
 if __name__ == "__main__":
