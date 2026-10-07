@@ -110,8 +110,14 @@ def alert_discord(card_name, price, time_left):
 def main():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
-        "Accept": "application/json",
-        "Cookie": COOKIE
+        "Accept": "*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.wiki-masters.com/marketplace",
+        "Origin": "https://www.wiki-masters.com",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Cookie": COOKIE.strip() if COOKIE else ""
     }
 
     all_auctions = []
