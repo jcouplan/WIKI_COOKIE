@@ -128,7 +128,7 @@ def alert_discord(card_name, price, time_left):
 def authenticate():
     refresh_token = get_saved_refresh_token()
     if not refresh_token:
-        print("Erreur : Aucun refresh token trouvé.")
+        print("Erreur: refresh token introuvable.")
         exit(1)
 
     url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
@@ -160,7 +160,6 @@ def authenticate():
     return "; ".join(cookie_parts)
 
 def find_target_card(obj):
-    """Parcourt tout l'objet récursivement pour repérer l'UUID ou le nom de la carte."""
     if isinstance(obj, dict):
         for v in obj.values():
             match = find_target_card(v)
@@ -181,7 +180,7 @@ def find_target_card(obj):
 
 def main():
     if not ANON_KEY:
-        print("Erreur: Le secret WIKI_ANON_KEY est requis.")
+        print("Erreur: WIKI_ANON_KEY manquant.")
         exit(1)
 
     cookie = authenticate()
@@ -198,70 +197,60 @@ def main():
         "Cookie": cookie
     }
 
-    all_auctions = []
-    seen_ids = set()
+    session = requests.Session()
+    session.headers.update(headers)
 
-    for page in range(1, 11):
-        url = f"https://www.wiki-masters.com/api/marketplace?page={page}&limit=50&sort=recent&mine=1"
+    cache = load_cache()
+    seen_ids = set()
+    new_finds = 0
+
+    unique_queries = sorted(list(set(WATCHLIST.values())))
+    print(f"Lancement du scan ciblé sur {len(unique_queries)} requêtes...")
+
+    for query in unique_queries:
+        url = "https://www.wiki-masters.com/api/marketplace"
+        params = {
+            "page": 1,
+            "limit": 50,
+            "sort": "recent",
+            "q": query
+        }
+
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = session.get(url, params=params, timeout=10)
             if response.status_code != 200:
-                print(f"Page {page} arrêt (Code {response.status_code})")
-                break
+                continue
 
             data = response.json()
             auctions = data.get("auctions", [])
-            if not auctions:
-                break
 
-            new_count = 0
             for auction in auctions:
-                a_id = auction.get("id")
-                if a_id and a_id not in seen_ids:
-                    seen_ids.add(a_id)
-                    all_auctions.append(auction)
-                    new_count += 1
+                auction_id = auction.get("id")
+                if not auction_id or auction_id in seen_ids or auction_id in cache:
+                    continue
 
-            print(f"Page {page} : {len(auctions)} annonces reçues ({new_count} nouvelles)")
+                seen_ids.add(auction_id)
+                matched_name = find_target_card(auction)
 
-            if new_count == 0 or len(auctions) < 50:
-                break
+                if matched_name:
+                    price = (
+                        auction.get("current_bid")
+                        or auction.get("base_amount")
+                        or auction.get("price")
+                        or auction.get("buy_now_price")
+                        or "?"
+                    )
+                    end_at = auction.get("end_at") or auction.get("ends_at") or auction.get("expires_at")
+                    time_left = get_time_remaining(end_at)
 
-        except requests.RequestException as e:
-            print(f"Erreur API page {page} : {e}")
-            break
+                    print(f"MATCH: {matched_name} | {price} W | Reste : {time_left}")
+                    alert_discord(matched_name, price, time_left)
+                    cache.add(auction_id)
+                    new_finds += 1
+                    time.sleep(0.3)
 
-    print(f"Total annonces uniques analysées : {len(all_auctions)}")
-
-    if all_auctions:
-        print(f"Clés d'une annonce type : {list(all_auctions[0].keys())}")
-
-    cache = load_cache()
-    new_finds = 0
-
-    for auction in all_auctions:
-        auction_id = auction.get("id")
-        if not auction_id or auction_id in cache:
-            continue
-
-        matched_name = find_target_card(auction)
-
-        if matched_name:
-            price = (
-                auction.get("current_bid")
-                or auction.get("base_amount")
-                or auction.get("price")
-                or auction.get("buy_now_price")
-                or "?"
-            )
-            end_at = auction.get("end_at") or auction.get("ends_at") or auction.get("expires_at")
-            time_left = get_time_remaining(end_at)
-
-            print(f"MATCH: {matched_name} | {price} W | Reste : {time_left}")
-            alert_discord(matched_name, price, time_left)
-            cache.add(auction_id)
-            new_finds += 1
-            time.sleep(0.5)
+        except requests.RequestException:
+            pass
 
     print(f"Total alertes envoyées : {new_finds}")
     if new_finds > 0:
