@@ -26,7 +26,9 @@ jobs:
       - name: Run monitor
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          WIKI_COOKIE: ${{ secrets.WIKI_COOKIE }}
+          WIKI_EMAIL: ${{ secrets.WIKI_EMAIL }}
+          WIKI_PASSWORD: ${{ secrets.WIKI_PASSWORD }}
+          WIKI_ANON_KEY: ${{ secrets.WIKI_ANON_KEY }}
         run: python monitor.py
 
       - name: Commit cache
