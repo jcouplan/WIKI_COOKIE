@@ -1,10 +1,10 @@
-import os
-import json
-import time
 import base64
-import requests
 from datetime import datetime, timezone
+import json
+import os
 from pathlib import Path
+import time
+import requests
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 ANON_KEY = os.environ.get("WIKI_ANON_KEY")
@@ -16,7 +16,10 @@ SESSION_FILE = Path("session.json")
 WATCHLIST = {
     "f544c0d2-40bc-4919-bbf7-0796a5d386ea": "Jean-Marc Jancovici",
     "94bfc70c-b3d0-46d8-9ef9-75f2c5bab102": "Grand remplacement",
-    "2ac49a52-0edb-472c-b113-6fa5027f7e3c": "Article 49 alinéa 3 de la Constitution de la Cinquième République française",
+    "2ac49a52-0edb-472c-b113-6fa5027f7e3c": (
+        "Article 49 alinéa 3 de la Constitution de la Cinquième République"
+        " française"
+    ),
     "07a8b53f-dd4c-4271-a88a-35f04cd32036": "Coke en stock",
     "e560b424-dac2-4cec-a16e-651f12e951ae": "Islamo-gauchisme",
     "f3e2f2b4-ac92-406e-93d8-6cc8acb4100e": "L'Affaire Tournesol",
@@ -44,233 +47,224 @@ WATCHLIST = {
     "6464b424-b409-4649-a51e-78ec502278f1": "Tintin et les Picaros",
     "f003c616-3ab8-41f6-b516-8bf59bb83348": "Vol 714 pour Sydney",
     "7951126c-f232-4238-a5df-ada2f7251be7": "François Couplan",
-    "76f0cf95-8d03-49bd-a947-b392de94d1f7": "Institut national des sciences appliquées de Toulouse",
+    "76f0cf95-8d03-49bd-a947-b392de94d1f7": (
+        "Institut national des sciences appliquées de Toulouse"
+    ),
     "4557681a-a957-490f-996c-725af218d917": "Philippe Bihouix",
 }
 
 WATCHLIST_NAMES = {name.lower().strip(): name for name in WATCHLIST.values()}
+SEARCH_QUERIES = list(WATCHLIST.values())
 
-SEARCH_QUERIES = [
-    "Tintin",
-    "Jean-Marc Jancovici",
-    "Grand remplacement",
-    "Article 49",
-    "Coke en stock",
-    "Islamo-gauchisme",
-    "Tournesol",
-    "L'Étoile mystérieuse",
-    "L'Île Noire",
-    "L'Oreille cassée",
-    "Crabe aux pinces d'or",
-    "Sceptre d'Ottokar",
-    "Licorne",
-    "Temple du Soleil",
-    "Rackham",
-    "Castafiore",
-    "Pharaon",
-    "Sept Boules de cristal",
-    "Master Poulet",
-    "Nujabes",
-    "Objectif Lune",
-    "On a marché sur la Lune",
-    "Vol 714",
-    "François Couplan",
-    "Institut national des sciences appliquées",
-    "Philippe Bihouix"
-]
 
 def load_cache():
-    if CACHE_FILE.exists():
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except json.JSONDecodeError:
-            return set()
-    return set()
+  if CACHE_FILE.exists():
+    try:
+      with open(CACHE_FILE, "r", encoding="utf-8") as f:
+        return set(json.load(f))
+    except json.JSONDecodeError:
+      return set()
+  return set()
+
 
 def save_cache(cache_data):
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(cache_data), f)
+  with open(CACHE_FILE, "w", encoding="utf-8") as f:
+    json.dump(list(cache_data), f)
+
 
 def get_saved_refresh_token():
-    if SESSION_FILE.exists():
-        try:
-            with open(SESSION_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("refresh_token")
-        except Exception:
-            pass
-    return REFRESH_TOKEN_ENV
+  if SESSION_FILE.exists():
+    try:
+      with open(SESSION_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        return data.get("refresh_token")
+    except Exception:
+      pass
+  return REFRESH_TOKEN_ENV
+
 
 def save_new_refresh_token(new_token):
-    with open(SESSION_FILE, "w", encoding="utf-8") as f:
-        json.dump({"refresh_token": new_token}, f)
+  with open(SESSION_FILE, "w", encoding="utf-8") as f:
+    json.dump({"refresh_token": new_token}, f)
+
 
 def get_time_info(end_at_str):
-    if not end_at_str:
-        return -1, "inconnue"
-    try:
-        end_time = datetime.fromisoformat(end_at_str.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        diff = end_time - now
-        total_seconds = int(diff.total_seconds())
+  if not end_at_str:
+    return -1, "inconnue"
+  try:
+    end_time = datetime.fromisoformat(end_at_str.replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    diff = end_time - now
+    total_seconds = int(diff.total_seconds())
 
-        if total_seconds <= 0:
-            return 0, "terminée"
+    if total_seconds <= 0:
+      return 0, "terminée"
 
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
 
-        if hours > 0:
-            display = f"{hours}h {minutes:02d}m"
-        else:
-            display = f"{minutes}m"
+    if hours > 0:
+      display = f"{hours}h {minutes:02d}m"
+    else:
+      display = f"{minutes}m"
 
-        return total_seconds, display
-    except Exception:
-        return -1, "inconnue"
+    return total_seconds, display
+  except Exception:
+    return -1, "inconnue"
+
 
 def alert_discord(card_name, price, time_left):
-    if not WEBHOOK_URL:
-        return
-    data = {
-        "content": f"🚨 **{card_name}** est sur le marché !\n💰 Mise actuelle : **{price} W** | ⏳ Reste : **{time_left}**",
-        "username": "WikiSniper"
-    }
-    requests.post(WEBHOOK_URL, json=data)
+  if not WEBHOOK_URL:
+    return
+  data = {
+      "content": (
+          f"🚨 **{card_name}** est sur le marché !\n💰 Mise actuelle : **{price}"
+          f" W** | ⏳ Reste : **{time_left}**"
+      ),
+      "username": "WikiSniper",
+  }
+  requests.post(WEBHOOK_URL, json=data)
+
 
 def authenticate():
-    refresh_token = get_saved_refresh_token()
-    if not refresh_token:
-        print("Erreur : refresh token introuvable.")
-        exit(1)
+  refresh_token = get_saved_refresh_token()
+  if not refresh_token:
+    print("Erreur : refresh token introuvable.")
+    exit(1)
 
-    url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
-    headers = {
-        "apikey": ANON_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "refresh_token": refresh_token
-    }
+  url = (
+      f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=refresh_token"
+  )
+  headers = {"apikey": ANON_KEY, "Content-Type": "application/json"}
+  payload = {"refresh_token": refresh_token}
 
-    r = requests.post(url, headers=headers, json=payload)
-    if r.status_code != 200:
-        print(f"Échec refresh ({r.status_code}): {r.text}")
-        exit(1)
+  r = requests.post(url, headers=headers, json=payload)
+  if r.status_code != 200:
+    print(f"Échec refresh ({r.status_code}): {r.text}")
+    exit(1)
 
-    session = r.json()
-    new_refresh = session.get("refresh_token")
-    if new_refresh:
-        save_new_refresh_token(new_refresh)
+  session = r.json()
+  new_refresh = session.get("refresh_token")
+  if new_refresh:
+    save_new_refresh_token(new_refresh)
 
-    raw_str = json.dumps(session)
-    b64_str = base64.b64encode(raw_str.encode('utf-8')).decode('utf-8')
-    full_value = f"base64-{b64_str}"
+  raw_str = json.dumps(session)
+  b64_str = base64.b64encode(raw_str.encode("utf-8")).decode("utf-8")
+  full_value = f"base64-{b64_str}"
 
-    chunks = [full_value[i:i+3000] for i in range(0, len(full_value), 3000)]
-    cookie_parts = [f"sb-{PROJECT_REF}-auth-token.{i}={chunk}" for i, chunk in enumerate(chunks)]
+  chunks = [full_value[i : i + 3000] for i in range(0, len(full_value), 3000)]
+  cookie_parts = [
+      f"sb-{PROJECT_REF}-auth-token.{i}={chunk}"
+      for i, chunk in enumerate(chunks)
+  ]
 
-    return "; ".join(cookie_parts)
+  return "; ".join(cookie_parts)
+
 
 def find_target_card(obj):
-    if isinstance(obj, dict):
-        for v in obj.values():
-            match = find_target_card(v)
-            if match:
-                return match
-    elif isinstance(obj, list):
-        for item in obj:
-            match = find_target_card(item)
-            if match:
-                return match
-    elif isinstance(obj, str):
-        val = obj.strip()
-        if val in WATCHLIST:
-            return WATCHLIST[val]
-        if val.lower() in WATCHLIST_NAMES:
-            return WATCHLIST_NAMES[val.lower()]
-    return None
+  if isinstance(obj, dict):
+    for v in obj.values():
+      match = find_target_card(v)
+      if match:
+        return match
+  elif isinstance(obj, list):
+    for item in obj:
+      match = find_target_card(item)
+      if match:
+        return match
+  elif isinstance(obj, str):
+    val = obj.strip()
+    if val in WATCHLIST:
+      return WATCHLIST[val]
+    if val.lower() in WATCHLIST_NAMES:
+      return WATCHLIST_NAMES[val.lower()]
+  return None
+
 
 def main():
-    if not ANON_KEY:
-        print("Erreur: WIKI_ANON_KEY manquant.")
-        exit(1)
+  if not ANON_KEY:
+    print("Erreur: WIKI_ANON_KEY manquant.")
+    exit(1)
 
-    cookie = authenticate()
+  cookie = authenticate()
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
-        "Accept": "*/*",
-        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.wiki-masters.com/marketplace",
-        "Origin": "https://www.wiki-masters.com",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "Cookie": cookie
-    }
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101"
+          " Firefox/156.0"
+      ),
+      "Accept": "*/*",
+      "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+      "Referer": "https://www.wiki-masters.com/marketplace",
+      "Origin": "https://www.wiki-masters.com",
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "Cookie": cookie,
+  }
 
-    session = requests.Session()
-    session.headers.update(headers)
+  session = requests.Session()
+  session.headers.update(headers)
 
-    cache = load_cache()
-    seen_ids = set()
-    new_finds = 0
+  cache = load_cache()
+  seen_ids = set()
+  new_finds = 0
 
-    print(f"Lancement du scan ciblé sur {len(SEARCH_QUERIES)} requêtes...")
+  print(f"Lancement du scan ciblé sur {len(SEARCH_QUERIES)} requêtes...")
 
-    for query in SEARCH_QUERIES:
-        url = "https://www.wiki-masters.com/api/marketplace"
-        params = {
-            "page": 1,
-            "limit": 50,
-            "sort": "recent",
-            "q": query
-        }
+  for query in SEARCH_QUERIES:
+    url = "https://www.wiki-masters.com/api/marketplace"
+    params = {"page": 1, "limit": 50, "sort": "recent", "q": query}
 
-        try:
-            response = session.get(url, params=params, timeout=10)
-            if response.status_code != 200:
-                continue
+    try:
+      response = session.get(url, params=params, timeout=10)
+      if response.status_code != 200:
+        continue
 
-            data = response.json()
-            auctions = data.get("auctions", [])
+      data = response.json()
+      auctions = data.get("auctions", [])
 
-            for auction in auctions:
-                auction_id = auction.get("id")
-                if not auction_id or auction_id in seen_ids or auction_id in cache:
-                    continue
+      for auction in auctions:
+        auction_id = auction.get("id")
+        if not auction_id or auction_id in seen_ids or auction_id in cache:
+          continue
 
-                seen_ids.add(auction_id)
-                matched_name = find_target_card(auction)
+        seen_ids.add(auction_id)
+        matched_name = find_target_card(auction)
 
-                if matched_name:
-                    end_at = auction.get("end_at") or auction.get("ends_at") or auction.get("expires_at")
-                    remaining_seconds, time_left = get_time_info(end_at)
+        if matched_name:
+          end_at = (
+              auction.get("end_at")
+              or auction.get("ends_at")
+              or auction.get("expires_at")
+          )
+          remaining_seconds, time_left = get_time_info(end_at)
 
-                    # Filtrage strict : alerte uniquement si l'enchère finit dans 30 min ou moins
-                    if 0 < remaining_seconds <= 1800:
-                        price = (
-                            auction.get("current_bid")
-                            or auction.get("base_amount")
-                            or auction.get("price")
-                            or auction.get("buy_now_price")
-                            or "?"
-                        )
+          if 0 < remaining_seconds <= 1800:
+            price = (
+                auction.get("current_bid")
+                or auction.get("base_amount")
+                or auction.get("price")
+                or auction.get("buy_now_price")
+                or "?"
+            )
 
-                        print(f"MATCH (-30m) : {matched_name} | {price} W | Reste : {time_left}")
-                        alert_discord(matched_name, price, time_left)
-                        cache.add(auction_id)
-                        new_finds += 1
-                        time.sleep(0.3)
+            print(
+                f"MATCH (-30m) : {matched_name} | {price} W | Reste :"
+                f" {time_left}"
+            )
+            alert_discord(matched_name, price, time_left)
+            cache.add(auction_id)
+            new_finds += 1
+            time.sleep(0.3)
 
-        except requests.RequestException:
-            pass
+    except requests.RequestException:
+      pass
 
-    print(f"Total alertes envoyées : {new_finds}")
-    if new_finds > 0:
-        save_cache(cache)
+  print(f"Total alertes envoyées : {new_finds}")
+  if new_finds > 0:
+    save_cache(cache)
+
 
 if __name__ == "__main__":
-    main()
+  main()
