@@ -1,12 +1,16 @@
 import os
 import json
 import time
+import base64
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
-COOKIE = os.environ.get("WIKI_COOKIE")
+EMAIL = os.environ.get("WIKI_EMAIL")
+PASSWORD = os.environ.get("WIKI_PASSWORD")
+ANON_KEY = os.environ.get("WIKI_ANON_KEY")
+PROJECT_REF = "cyrxjeppjqsxxjayfrur"
 CACHE_FILE = Path("cache.json")
 
 WATCHLIST = {
@@ -107,7 +111,44 @@ def alert_discord(card_name, price, time_left):
     r = requests.post(WEBHOOK_URL, json=data)
     print(f"-> Discord alerté pour '{card_name}' (Code HTTP {r.status_code})")
 
+def authenticate():
+    print("Authentification en cours...")
+    url = f"https://{PROJECT_REF}.supabase.co/auth/v1/token?grant_type=password"
+    headers = {
+        "apikey": ANON_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "email": EMAIL,
+        "password": PASSWORD
+    }
+    
+    r = requests.post(url, headers=headers, json=payload)
+    if r.status_code != 200:
+        print(f"Échec de l'authentification ({r.status_code}): {r.text}")
+        exit(1)
+        
+    session = r.json()
+    
+    # Encodage de la session en base64 pour matcher le format SSR de Supabase
+    raw_str = json.dumps(session)
+    b64_str = base64.b64encode(raw_str.encode('utf-8')).decode('utf-8')
+    full_value = f"base64-{b64_str}"
+    
+    # Supabase fragmente les cookies dépassant 3000 caractères
+    chunks = [full_value[i:i+3000] for i in range(0, len(full_value), 3000)]
+    cookie_parts = [f"sb-{PROJECT_REF}-auth-token.{i}={chunk}" for i, chunk in enumerate(chunks)]
+    
+    print("Authentification réussie, cookie généré.")
+    return "; ".join(cookie_parts)
+
 def main():
+    if not EMAIL or not PASSWORD or not ANON_KEY:
+        print("Erreur: Les secrets WIKI_EMAIL, WIKI_PASSWORD et WIKI_ANON_KEY sont requis.")
+        exit(1)
+
+    fresh_cookie = authenticate()
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0",
         "Accept": "*/*",
@@ -117,13 +158,12 @@ def main():
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
-        "Cookie": COOKIE.strip() if COOKIE else ""
+        "Cookie": fresh_cookie
     }
 
     all_auctions = []
     seen_ids = set()
 
-    # Parcours des pages 0 à 9 (jusqu'à 500 enchères)
     for page in range(0, 10):
         url = f"https://www.wiki-masters.com/api/marketplace?page={page}&limit=50&sort=recent"
         try:
